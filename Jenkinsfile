@@ -1,65 +1,59 @@
 pipeline {
     agent any
-        environment {
-        //once you sign up for Docker hub, use that user_id here
-        registry = "ananthkannan/mypython-app-may20"
-        //- update your credentials ID after creating credentials for connecting to Docker Hub
-        registryCredential = 'dockerhub'
-        dockerImage = ''
-    }
-    stages {
 
-        stage ('checkout') {
+    environment {
+        registryName = "testacr2568"
+        registryCredential = "ACR"
+        registryUrl = "testacr2568.azurecr.io"
+    }
+
+    stages {
+        stage('Checkout') {
             steps {
-            checkout([$class: 'GitSCM', branches: [[name: '*/master']], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[url: 'https://github.com/akannan1087/myPythonDockerRepo']]])
+                checkout scmGit(
+                    branches: [[name: '*/main']],
+                    extensions: [],
+                    userRemoteConfigs: [[url: 'https://github.com/venkats56/python-aks']]
+                )
             }
         }
-       
-        stage ('Build docker image') {
+
+        stage('Build Docker') {
             steps {
                 script {
-                dockerImage = docker.build registry + ":$BUILD_NUMBER"
-                //dockerImage = docker.build registry + ":$BUILD_NUMBER"
-
+                    // Declare dockerImage as a local variable
+                    def dockerImage = docker.build("${registryName}")
+                    // Save it to the environment for next stage
+                    env.DOCKER_IMAGE = "${dockerImage.imageName()}"
                 }
             }
         }
-       
-         // Uploading Docker images into Docker Hub
-    stage('Upload Image') {
-     steps{   
-         script {
-            docker.withRegistry( '', registryCredential ) {
-            dockerImage.push()
+
+        stage('Push Image') {
+            steps {
+                script {
+                    docker.withRegistry("https://${env.registryUrl}", env.registryCredential) {
+                        def dockerImage = docker.image(env.DOCKER_IMAGE)
+                        dockerImage.push()
+                    }
+                }
             }
         }
-      }
-    }
 
-    stage('Remove Unused docker image') {
-      steps{
-        sh "docker rmi $registry:$BUILD_NUMBER"
-      }
-    }
-   
-    stage ('K8S Deploy') {
-        steps {
-            script {
-                kubernetesDeploy(
-                    configs: 'k8s-deployment.yaml',
-                    kubeconfigId: 'K8S',
-                    enableConfigSubstitution: true
-                    )           
-               
+        stage('Deploy to AKS') {
+            steps {
+                withKubeConfig(
+                    caCertificate: '',
+                    clusterName: '',
+                    contextName: '',
+                    credentialsId: 'K8S',
+                    namespace: '',
+                    restrictKubeConfigAccess: false,
+                    serverUrl: ''
+                ) {
+                    sh "kubectl apply -f azure-aks.yaml"
+                }
             }
         }
     }
-  
-    }  
-}
-
-always {
-  // remove built docker image and prune system
-  print 'Cleaning up the Docker system.'
-  sh 'docker system prune -f'
 }
